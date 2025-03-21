@@ -1,15 +1,23 @@
 document.addEventListener('DOMContentLoaded', () => {
-    const speakButton = document.getElementById('speakButton');
-    const audioElement = document.getElementById('responseAudio');
+    const recordBtn = document.getElementById('recordBtn');
+    const playBtn = document.getElementById('playBtn');
+    const status = document.getElementById('status');
 
-    if (!speakButton || !audioElement) {
-        console.error('Elements not found: speakButton or responseAudio');
+    if (!recordBtn || !playBtn || !status) {
+        console.error('Elements not found: recordBtn, playBtn, or status');
         return;
     }
 
-    speakButton.addEventListener('click', async () => {
+    let audioBlob = null; // Store the response audio for playback
+
+    recordBtn.addEventListener('click', async () => {
         console.log('Speak Now button clicked');
         try {
+            // Reset UI
+            status.textContent = 'Requesting microphone access...';
+            playBtn.classList.add('hidden');
+            audioBlob = null;
+
             console.log('Requesting microphone access...');
             const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
             console.log('Microphone access granted');
@@ -17,9 +25,13 @@ document.addEventListener('DOMContentLoaded', () => {
             const mediaRecorder = new MediaRecorder(stream);
             const chunks = [];
 
+            // Update UI to show recording state
             mediaRecorder.start();
             console.log('Recording started');
-            speakButton.textContent = 'Recording...';
+            recordBtn.textContent = 'Recording...';
+            recordBtn.classList.remove('bg-red-500', 'hover:bg-red-600');
+            recordBtn.classList.add('bg-red-700', 'animate-pulse');
+            status.textContent = 'Listening...';
 
             mediaRecorder.ondataavailable = (e) => {
                 chunks.push(e.data);
@@ -28,7 +40,11 @@ document.addEventListener('DOMContentLoaded', () => {
 
             mediaRecorder.onstop = async () => {
                 console.log('Recording stopped');
-                speakButton.textContent = 'Speak Now';
+                recordBtn.textContent = 'Speak Now';
+                recordBtn.classList.remove('bg-red-700', 'animate-pulse');
+                recordBtn.classList.add('bg-red-500', 'hover:bg-red-600');
+                status.textContent = 'Processing...';
+
                 const blob = new Blob(chunks, { type: 'audio/wav' });
                 console.log('Audio blob created:', blob);
 
@@ -46,11 +62,12 @@ document.addEventListener('DOMContentLoaded', () => {
                 }
 
                 console.log('Response received from back-end');
-                const audioBlob = await response.blob();
+                audioBlob = await response.blob();
                 const audioUrl = URL.createObjectURL(audioBlob);
-                audioElement.src = audioUrl;
-                audioElement.play();
-                console.log('Playing response audio');
+
+                // Show the play button and update status
+                playBtn.classList.remove('hidden');
+                status.textContent = 'Response ready! Click "Play Response" to listen.';
             };
 
             // Stop recording after 5 seconds
@@ -59,8 +76,23 @@ document.addEventListener('DOMContentLoaded', () => {
             }, 5000);
         } catch (error) {
             console.error('Error:', error);
-            speakButton.textContent = 'Speak Now';
+            recordBtn.textContent = 'Speak Now';
+            recordBtn.classList.remove('bg-red-700', 'animate-pulse');
+            recordBtn.classList.add('bg-red-500', 'hover:bg-red-600');
+            status.textContent = 'Error: ' + error.message;
             alert('Error: ' + error.message);
+        }
+    });
+
+    playBtn.addEventListener('click', () => {
+        if (audioBlob) {
+            const audioUrl = URL.createObjectURL(audioBlob);
+            const audio = new Audio(audioUrl);
+            audio.play();
+            status.textContent = 'Playing response...';
+            console.log('Playing response audio');
+        } else {
+            status.textContent = 'No response audio available.';
         }
     });
 });
