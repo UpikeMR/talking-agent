@@ -1,27 +1,19 @@
 from fastapi import FastAPI, File, UploadFile, HTTPException, Request
-from fastapi.responses import JSONResponse, StreamingResponse
+from fastapi.responses import JSONResponse, StreamingResponse, FileResponse
+from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
 import google.generativeai as genai
 from google.cloud import texttospeech
 import os
 import io
 import logging
+from pathlib import Path
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-app = FastAPI(title="Talking Agent Backend")
-
-# Configure CORS - be very permissive for troubleshooting
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],
-    allow_origin_regex=".*",  # Allow all origins with regex
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
+app = FastAPI(title="Talking Agent")
 
 # Load credentials and configure APIs
 try:
@@ -43,54 +35,17 @@ try:
 except Exception as e:
     logger.error(f"Error during initialization: {str(e)}")
 
-# Add a middleware to add CORS headers to every response
-@app.middleware("http")
-async def add_cors_headers(request: Request, call_next):
-    try:
-        response = await call_next(request)
-        # Add CORS headers to every response
-        response.headers["Access-Control-Allow-Origin"] = "*"
-        response.headers["Access-Control-Allow-Methods"] = "POST, GET, OPTIONS"
-        response.headers["Access-Control-Allow-Headers"] = "Content-Type"
-        return response
-    except Exception as e:
-        logger.error(f"Middleware error: {str(e)}")
-        return JSONResponse(
-            status_code=500,
-            content={"detail": f"Internal server error: {str(e)}"},
-            headers={
-                "Access-Control-Allow-Origin": "*",
-                "Access-Control-Allow-Methods": "POST, GET, OPTIONS",
-                "Access-Control-Allow-Headers": "Content-Type",
-            }
-        )
+# Mount static files directory
+static_dir = Path(__file__).parent / "static"
+app.mount("/static", StaticFiles(directory=static_dir), name="static")
 
-# Health check endpoint
-@app.get("/")
-async def root():
-    logger.info("Root endpoint accessed")
-    return {"status": "online", "message": "Talking Agent Backend is running"}
-
-@app.get("/test")
+# API routes
+@app.get("/api/test")
 async def test():
     logger.info("Test endpoint accessed")
-    return {"status": "ok", "message": "Backend is running and CORS should be working"}
+    return {"status": "ok", "message": "API is running"}
 
-# Handle OPTIONS preflight requests
-@app.options("/{path:path}")
-async def options_route(path: str):
-    logger.info(f"OPTIONS request received for path: {path}")
-    return JSONResponse(
-        content={"detail": "OK"},
-        headers={
-            "Access-Control-Allow-Origin": "*",
-            "Access-Control-Allow-Methods": "POST, GET, OPTIONS",
-            "Access-Control-Allow-Headers": "Content-Type",
-        }
-    )
-
-# Main conversation endpoint
-@app.post("/conversation")
+@app.post("/api/conversation")
 async def conversation(audio: UploadFile = File(...)):
     """Process audio and return synthesized speech response"""
     logger.info(f"Conversation endpoint called with file: {audio.filename}, content-type: {audio.content_type}")
@@ -105,8 +60,7 @@ async def conversation(audio: UploadFile = File(...)):
             logger.error("GEMINI_API_KEY not configured")
             return JSONResponse(
                 status_code=500, 
-                content={"detail": "GEMINI_API_KEY not configured"},
-                headers={"Access-Control-Allow-Origin": "*"}
+                content={"detail": "GEMINI_API_KEY not configured"}
             )
         
         # Use Gemini to process audio
@@ -119,8 +73,7 @@ async def conversation(audio: UploadFile = File(...)):
             logger.error("No response text from Gemini")
             return JSONResponse(
                 status_code=500, 
-                content={"detail": "No response from AI assistant"},
-                headers={"Access-Control-Allow-Origin": "*"}
+                content={"detail": "No response from AI assistant"}
             )
         
         text = response.text
@@ -149,25 +102,20 @@ async def conversation(audio: UploadFile = File(...)):
         return StreamingResponse(
             audio_stream,
             media_type="audio/wav",
-            headers={
-                "Content-Disposition": "inline; filename=response.wav",
-                "Access-Control-Allow-Origin": "*",
-                "Access-Control-Allow-Methods": "POST, GET, OPTIONS",
-                "Access-Control-Allow-Headers": "Content-Type",
-            }
+            headers={"Content-Disposition": "inline; filename=response.wav"}
         )
     
     except Exception as e:
         logger.error(f"Error in conversation endpoint: {str(e)}")
         return JSONResponse(
             status_code=500,
-            content={"detail": f"Error processing request: {str(e)}"},
-            headers={
-                "Access-Control-Allow-Origin": "*",
-                "Access-Control-Allow-Methods": "POST, GET, OPTIONS",
-                "Access-Control-Allow-Headers": "Content-Type",
-            }
+            content={"detail": f"Error processing request: {str(e)}"}
         )
+
+# Serve the main HTML page
+@app.get("/")
+async def serve_index():
+    return FileResponse(static_dir / "index.html")
 
 # For running locally
 if __name__ == "__main__":
