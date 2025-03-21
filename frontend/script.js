@@ -60,7 +60,7 @@ document.addEventListener('DOMContentLoaded', () => {
                     const response = await fetch('https://talking-agent-backend.onrender.com/conversation', {
                         method: 'POST',
                         body: formData,
-                        mode: 'cors',
+                        mode: 'cors'
                     });
 
                     if (!response.ok) {
@@ -87,7 +87,7 @@ document.addEventListener('DOMContentLoaded', () => {
                     mediaRecorder.stop();
                     console.log('Recording stopped after timeout');
                 }
-            }, 15000
+            }, 5000);
         } catch (error) {
             console.error('Error:', error);
             recordBtn.textContent = 'Speak Now';
