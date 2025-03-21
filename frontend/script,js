@@ -1,10 +1,11 @@
 document.addEventListener('DOMContentLoaded', () => {
     const recordBtn = document.getElementById('recordBtn');
+    const micIcon = document.getElementById('micIcon');
     const playBtn = document.getElementById('playBtn');
     const status = document.getElementById('status');
 
-    if (!recordBtn || !playBtn || !status) {
-        console.error('Elements not found: recordBtn, playBtn, or status');
+    if (!recordBtn || !micIcon || !playBtn || !status) {
+        console.error('Elements not found: recordBtn, micIcon, playBtn, or status');
         return;
     }
 
@@ -31,6 +32,7 @@ document.addEventListener('DOMContentLoaded', () => {
             recordBtn.textContent = 'Recording...';
             recordBtn.classList.remove('bg-red-500', 'hover:bg-red-600');
             recordBtn.classList.add('bg-red-700', 'animate-pulse');
+            micIcon.classList.add('animate-pulse', 'text-yellow-300'); // Animate the microphone icon
             status.textContent = 'Listening...';
 
             mediaRecorder.ondataavailable = (e) => {
@@ -43,6 +45,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 recordBtn.textContent = 'Speak Now';
                 recordBtn.classList.remove('bg-red-700', 'animate-pulse');
                 recordBtn.classList.add('bg-red-500', 'hover:bg-red-600');
+                micIcon.classList.remove('animate-pulse', 'text-yellow-300');
                 status.textContent = 'Processing...';
 
                 const blob = new Blob(chunks, { type: 'audio/wav' });
@@ -78,6 +81,7 @@ document.addEventListener('DOMContentLoaded', () => {
             console.error('Error:', error);
             recordBtn.textContent = 'Speak Now';
             recordBtn.classList.remove('bg-red-700', 'animate-pulse');
+            micIcon.classList.remove('animate-pulse', 'text-yellow-300');
             recordBtn.classList.add('bg-red-500', 'hover:bg-red-600');
             status.textContent = 'Error: ' + error.message;
             alert('Error: ' + error.message);
