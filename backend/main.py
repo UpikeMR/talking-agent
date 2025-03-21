@@ -1,133 +1,176 @@
 from fastapi import FastAPI, File, UploadFile, HTTPException, Request
-from fastapi.responses import StreamingResponse, JSONResponse
+from fastapi.responses import JSONResponse, StreamingResponse
 from fastapi.middleware.cors import CORSMiddleware
 import google.generativeai as genai
 from google.cloud import texttospeech
 import os
 import io
+import logging
+
+# Configure logging
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
 app = FastAPI(title="Talking Agent Backend")
 
-# CORS middleware configuration
+# Configure CORS - be very permissive for troubleshooting
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # Allow all origins
+    allow_origins=["*"],
+    allow_origin_regex=".*",  # Allow all origins with regex
     allow_credentials=True,
-    allow_methods=["GET", "POST", "OPTIONS", "PUT", "DELETE"],  # Allow all common methods
-    allow_headers=["*"],  # Allow all headers
-    expose_headers=["Content-Disposition"],
-    max_age=86400,
+    allow_methods=["*"],
+    allow_headers=["*"],
 )
 
-# Write TTS credentials to a temporary file
-tts_credentials_json = os.getenv("TTS_CREDENTIALS_JSON")
-if tts_credentials_json:
-    with open("/tmp/tts-credentials.json", "w") as f:
-        f.write(tts_credentials_json)
-    os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = "/tmp/tts-credentials.json"
-else:
-    print("WARNING: TTS_CREDENTIALS_JSON environment variable not set")
+# Load credentials and configure APIs
+try:
+    tts_credentials_json = os.getenv("TTS_CREDENTIALS_JSON")
+    if tts_credentials_json:
+        with open("/tmp/tts-credentials.json", "w") as f:
+            f.write(tts_credentials_json)
+        os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = "/tmp/tts-credentials.json"
+        logger.info("TTS credentials loaded")
+    else:
+        logger.warning("TTS_CREDENTIALS_JSON environment variable not set")
+    
+    api_key = os.getenv("GEMINI_API_KEY")
+    if api_key:
+        genai.configure(api_key=api_key)
+        logger.info("Gemini API configured")
+    else:
+        logger.warning("GEMINI_API_KEY environment variable not set")
+except Exception as e:
+    logger.error(f"Error during initialization: {str(e)}")
 
-# Configure APIs with environment variables
-api_key = os.getenv("GEMINI_API_KEY")
-if not api_key:
-    print("WARNING: GEMINI_API_KEY environment variable not set")
-else:
-    genai.configure(api_key=api_key)
+# Add a middleware to add CORS headers to every response
+@app.middleware("http")
+async def add_cors_headers(request: Request, call_next):
+    try:
+        response = await call_next(request)
+        # Add CORS headers to every response
+        response.headers["Access-Control-Allow-Origin"] = "*"
+        response.headers["Access-Control-Allow-Methods"] = "POST, GET, OPTIONS"
+        response.headers["Access-Control-Allow-Headers"] = "Content-Type"
+        return response
+    except Exception as e:
+        logger.error(f"Middleware error: {str(e)}")
+        return JSONResponse(
+            status_code=500,
+            content={"detail": f"Internal server error: {str(e)}"},
+            headers={
+                "Access-Control-Allow-Origin": "*",
+                "Access-Control-Allow-Methods": "POST, GET, OPTIONS",
+                "Access-Control-Allow-Headers": "Content-Type",
+            }
+        )
 
-# Simple health check endpoints
+# Health check endpoint
 @app.get("/")
 async def root():
+    logger.info("Root endpoint accessed")
     return {"status": "online", "message": "Talking Agent Backend is running"}
 
 @app.get("/test")
 async def test():
+    logger.info("Test endpoint accessed")
     return {"status": "ok", "message": "Backend is running and CORS should be working"}
 
-# Handle OPTIONS request explicitly for all routes
-@app.options("/{full_path:path}")
-async def options_route(request: Request):
+# Handle OPTIONS preflight requests
+@app.options("/{path:path}")
+async def options_route(path: str):
+    logger.info(f"OPTIONS request received for path: {path}")
     return JSONResponse(
         content={"detail": "OK"},
         headers={
             "Access-Control-Allow-Origin": "*",
-            "Access-Control-Allow-Methods": "GET, POST, OPTIONS, PUT, DELETE",
-            "Access-Control-Allow-Headers": "*",
+            "Access-Control-Allow-Methods": "POST, GET, OPTIONS",
+            "Access-Control-Allow-Headers": "Content-Type",
         }
     )
 
-# The main conversation endpoint that handles audio processing
+# Main conversation endpoint
 @app.post("/conversation")
 async def conversation(audio: UploadFile = File(...)):
-    """
-    Receives an audio file, processes it with the talking-agent assistant,
-    and returns a .wav audio response.
-    """
+    """Process audio and return synthesized speech response"""
+    logger.info(f"Conversation endpoint called with file: {audio.filename}, content-type: {audio.content_type}")
+    
     try:
-        # Read the uploaded audio file
+        # Read audio data
         audio_data = await audio.read()
-        
-        # Log file information
-        print(f"Received file: {audio.filename} with content type: {audio.content_type}")
+        logger.info(f"Received audio data of size: {len(audio_data)} bytes")
         
         # Check for API key
-        if not api_key:
-            raise HTTPException(status_code=500, detail="GEMINI_API_KEY not configured")
+        if not os.getenv("GEMINI_API_KEY"):
+            logger.error("GEMINI_API_KEY not configured")
+            return JSONResponse(
+                status_code=500, 
+                content={"detail": "GEMINI_API_KEY not configured"},
+                headers={"Access-Control-Allow-Origin": "*"}
+            )
         
-        # Initialize Gemini model
-        try:
-            model = genai.GenerativeModel("talking-agent")
-        except Exception as model_error:
-            raise HTTPException(status_code=500, 
-                             detail=f"Failed to initialize Gemini model: {str(model_error)}")
+        # Use Gemini to process audio
+        logger.info("Initializing Gemini model")
+        model = genai.GenerativeModel("talking-agent")
         
-        # Process with Gemini
-        try:
-            response = model.generate_content(audio_data)
-            if not response.text:
-                raise HTTPException(status_code=500, detail="No response from AI assistant")
-            text = response.text
-            print(f"Generated response text: {text[:100]}...")  # Log first 100 chars
-        except Exception as gemini_error:
-            raise HTTPException(status_code=500, 
-                             detail=f"Error processing with Gemini: {str(gemini_error)}")
-
-        # Text-to-Speech conversion
-        try:
-            tts_client = texttospeech.TextToSpeechClient()
-            synthesis_input = texttospeech.SynthesisInput(text=text)
-            voice = texttospeech.VoiceSelectionParams(
-                language_code="en-US",
-                ssml_gender=texttospeech.SsmlVoiceGender.NEUTRAL
+        logger.info("Processing audio with Gemini")
+        response = model.generate_content(audio_data)
+        if not response.text:
+            logger.error("No response text from Gemini")
+            return JSONResponse(
+                status_code=500, 
+                content={"detail": "No response from AI assistant"},
+                headers={"Access-Control-Allow-Origin": "*"}
             )
-            audio_config = texttospeech.AudioConfig(
-                audio_encoding=texttospeech.AudioEncoding.LINEAR16
-            )
-            tts_response = tts_client.synthesize_speech(
-                input=synthesis_input, voice=voice, audio_config=audio_config
-            )
-            print(f"Generated audio response of {len(tts_response.audio_content)} bytes")
-        except Exception as tts_error:
-            raise HTTPException(status_code=500, 
-                             detail=f"Error with Text-to-Speech: {str(tts_error)}")
-
-        # Stream the audio response
+        
+        text = response.text
+        logger.info(f"Generated text response: {text[:100]}...")
+        
+        # Convert text to speech
+        logger.info("Converting text to speech")
+        tts_client = texttospeech.TextToSpeechClient()
+        synthesis_input = texttospeech.SynthesisInput(text=text)
+        voice = texttospeech.VoiceSelectionParams(
+            language_code="en-US",
+            ssml_gender=texttospeech.SsmlVoiceGender.NEUTRAL
+        )
+        audio_config = texttospeech.AudioConfig(
+            audio_encoding=texttospeech.AudioEncoding.LINEAR16
+        )
+        
+        tts_response = tts_client.synthesize_speech(
+            input=synthesis_input, voice=voice, audio_config=audio_config
+        )
+        
+        logger.info(f"Generated audio of size: {len(tts_response.audio_content)} bytes")
+        
+        # Return audio response
         audio_stream = io.BytesIO(tts_response.audio_content)
         return StreamingResponse(
             audio_stream,
             media_type="audio/wav",
             headers={
                 "Content-Disposition": "inline; filename=response.wav",
-                "Access-Control-Allow-Origin": "*"
+                "Access-Control-Allow-Origin": "*",
+                "Access-Control-Allow-Methods": "POST, GET, OPTIONS",
+                "Access-Control-Allow-Headers": "Content-Type",
+            }
+        )
+    
+    except Exception as e:
+        logger.error(f"Error in conversation endpoint: {str(e)}")
+        return JSONResponse(
+            status_code=500,
+            content={"detail": f"Error processing request: {str(e)}"},
+            headers={
+                "Access-Control-Allow-Origin": "*",
+                "Access-Control-Allow-Methods": "POST, GET, OPTIONS",
+                "Access-Control-Allow-Headers": "Content-Type",
             }
         )
 
-    except Exception as e:
-        print(f"Error in /conversation endpoint: {str(e)}")
-        raise HTTPException(status_code=500, detail=f"Error processing request: {str(e)}")
-
-# Start the server if run directly
+# For running locally
 if __name__ == "__main__":
     import uvicorn
     port = int(os.getenv("PORT", 8000))
-    uvicorn.run("main:app", host="0.0.0.0", port=port, reload=True)
+    uvicorn.run("main:app", host="0.0.0.0", port=port)

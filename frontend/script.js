@@ -4,10 +4,27 @@ document.addEventListener('DOMContentLoaded', () => {
     const playBtn = document.getElementById('playBtn');
     const status = document.getElementById('status');
 
+    // Backend URL - change this if you're using a different URL
+    const backendUrl = 'https://talking-agent-backend.onrender.com';
+
     if (!recordBtn || !micIcon || !playBtn || !status) {
         console.error('Elements not found: recordBtn, micIcon, playBtn, or status');
         return;
     }
+
+    // First check if backend is reachable
+    status.textContent = 'Checking connection to server...';
+    
+    // Try a simple request to check server connection
+    fetch(`${backendUrl}/test`, { method: 'GET', mode: 'no-cors' })
+        .then(() => {
+            status.textContent = 'Server connection established. Ready to record.';
+            console.log('Backend connection established');
+        })
+        .catch(error => {
+            console.warn('Backend connection test failed:', error);
+            status.textContent = 'Warning: Server connection issue. Recording may not work.';
+        });
 
     let audioBlob = null; // Store the response audio for playback
 
@@ -19,11 +36,15 @@ document.addEventListener('DOMContentLoaded', () => {
             playBtn.classList.add('hidden');
             audioBlob = null;
 
+            // Request microphone access
             console.log('Requesting microphone access...');
             const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
             console.log('Microphone access granted');
 
-            const mediaRecorder = new MediaRecorder(stream);
+            // Create media recorder
+            const mediaRecorder = new MediaRecorder(stream, {
+                mimeType: 'audio/webm'
+            });
             const chunks = [];
 
             // Update UI to show recording state
@@ -32,7 +53,7 @@ document.addEventListener('DOMContentLoaded', () => {
             recordBtn.textContent = 'Recording...';
             recordBtn.classList.remove('bg-red-500', 'hover:bg-red-600');
             recordBtn.classList.add('bg-red-700', 'animate-pulse');
-            micIcon.classList.add('animate-pulse', 'text-yellow-300'); // Animate the microphone icon
+            micIcon.classList.add('animate-pulse', 'text-yellow-300');
             status.textContent = 'Listening...';
 
             mediaRecorder.ondataavailable = (e) => {
@@ -52,16 +73,37 @@ document.addEventListener('DOMContentLoaded', () => {
                 const blob = new Blob(chunks, { type: 'audio/webm' });
                 console.log('Audio blob created:', blob);
 
+                // Prepare FormData for server
                 const formData = new FormData();
                 formData.append('audio', blob, 'recording.webm');
                 console.log('Sending audio to back-end...');
 
+                // Try multiple approaches to connect to backend
                 try {
-                    const response = await fetch('https://talking-agent-backend.onrender.com/conversation', {
-                        method: 'POST',
-                        body: formData,
-                        mode: 'cors'
-                    });
+                    let response;
+                    
+                    // First attempt: Regular CORS request
+                    try {
+                        response = await fetch(`${backendUrl}/conversation`, {
+                            method: 'POST',
+                            body: formData,
+                            mode: 'cors'
+                        });
+                    } catch (corsError) {
+                        console.warn('CORS request failed, trying no-cors mode:', corsError);
+                        
+                        // Second attempt: no-cors mode (limited but might work for some cases)
+                        response = await fetch(`${backendUrl}/conversation`, {
+                            method: 'POST',
+                            body: formData,
+                            mode: 'no-cors'
+                        });
+                        
+                        // Note: with no-cors, we can't check response.ok or get the response content
+                        // This is a limitation of the no-cors mode
+                        status.textContent = 'Request sent in no-cors mode. Check server logs.';
+                        return;
+                    }
 
                     if (!response.ok) {
                         const errorText = await response.text();
@@ -78,6 +120,20 @@ document.addEventListener('DOMContentLoaded', () => {
                 } catch (fetchError) {
                     console.error('Fetch error:', fetchError);
                     status.textContent = 'Error connecting to server: ' + fetchError.message;
+                    
+                    // Display more helpful message
+                    const additionalInfo = document.createElement('div');
+                    additionalInfo.innerHTML = `
+                        <div class="mt-4 text-sm text-red-500">
+                            <p>Server connection failed. Possible issues:</p>
+                            <ul class="list-disc ml-5 mt-2">
+                                <li>Backend server might be down</li>
+                                <li>CORS configuration issue on the server</li>
+                                <li>Network connectivity problem</li>
+                            </ul>
+                        </div>
+                    `;
+                    status.appendChild(additionalInfo);
                 }
             };
 
