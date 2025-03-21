@@ -1,0 +1,41 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Talking Agent</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        body {
+            background: linear-gradient(135deg, #e5e7eb, #6b7280);
+            min-height: 100vh;
+        }
+    </style>
+</head>
+<body class="flex items-center justify-center">
+    <div class="bg-white p-8 rounded-xl shadow-2xl max-w-md w-full text-center transform hover:scale-105 transition-transform duration-300">
+        <h1 class="text-4xl font-extrabold text-gray-800 mb-2">Talking Agent</h1>
+        <p class="text-lg text-gray-600 mb-4">A talking AI database of all our findings and research</p>
+        
+        <div class="space-y-6">
+            <button id="recordBtn" class="bg-red-500 text-white px-6 py-3 rounded-full font-semibold hover:bg-red-600 transition-colors duration-200 flex items-center justify-center mx-auto">
+                <svg class="w-6 h-6 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4-4h4m-4-7a3 3 0 013-3V5a3 3 0 013 3v3a3 3 0 01-3 3z"/></svg>
+                Speak Now
+            </button>
+            
+            <button id="playBtn" class="bg-gray-700 text-white px-6 py-3 rounded-full font-semibold hover:bg-gray-800 transition-colors duration-200 flex items-center justify-center mx-auto hidden">
+                <svg class="w-6 h-6 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 10l4.553-2.276A1 1 0 0121 8.618v6.764a1 1 0 01-1.447.894L15 14V10zM5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z"/></svg>
+                Play Response
+            </button>
+        </div>
+
+        <p id="status" class="text-sm text-gray-500 mt-4">Press "Speak Now" to start</p>
+        
+        <footer class="mt-6 text-gray-400 text-sm">
+            Developed by Ivan Wheeling
+        </footer>
+    </div>
+
+    <script src="script.js"></script>
+</body>
+</html>
