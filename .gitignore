@@ -1,0 +1,52 @@
+# Python-specific ignores
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+.Python
+env/
+venv/
+ENV/
+env.bak/
+venv.bak/
+*.egg-info/
+dist/
+build/
+*.so
+
+# Environment variables and secrets
+.env
+*.env
+*.key
+secrets/
+
+# Local development and IDE files
+*.log
+*.pid
+*.seed
+*.swp
+.vscode/
+.idea/
+*.sublime-workspace
+*.sublime-project
+
+# Dependency directories
+node_modules/
+pip-wheel-metadata/
+
+# OS-generated files
+.DS_Store
+Thumbs.db
+*.bak
+*.tmp
+
+# Render-specific (if applicable)
+*.render.yaml  # Only if you don’t want to commit Render config
+
+# Miscellaneous
+*.cache
+*.coverage
+htmlcov/
+coverage.xml
+*.pytest_cache/
+*.prof
