@@ -1,10 +1,8 @@
-from fastapi import FastAPI, File, UploadFile, HTTPException, Request
-from fastapi.responses import JSONResponse, StreamingResponse, FileResponse
+from fastapi import FastAPI, File, UploadFile, HTTPException
+from fastapi.responses import StreamingResponse, JSONResponse, FileResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
-import google.generativeai as genai
-from google.cloud import texttospeech
-import os
+import httpx
 import io
 import logging
 from pathlib import Path
@@ -13,121 +11,74 @@ from pathlib import Path
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-app = FastAPI(title="Talking Agent")
+app = FastAPI(title="Talking Agent Proxy")
 
-# Load credentials and configure APIs
-try:
-    tts_credentials_json = os.getenv("TTS_CREDENTIALS_JSON")
-    if tts_credentials_json:
-        with open("/tmp/tts-credentials.json", "w") as f:
-            f.write(tts_credentials_json)
-        os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = "/tmp/tts-credentials.json"
-        logger.info("TTS credentials loaded")
-    else:
-        logger.warning("TTS_CREDENTIALS_JSON environment variable not set")
-    
-    api_key = os.getenv("GEMINI_API_KEY")
-    if api_key:
-        genai.configure(api_key=api_key)
-        logger.info("Gemini API configured")
-    else:
-        logger.warning("GEMINI_API_KEY environment variable not set")
-except Exception as e:
-    logger.error(f"Error during initialization: {str(e)}")
+# Allow CORS if your front-end is served from a different domain
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],  # For production, restrict this to your front-end URL
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
-# Mount static files directory
+# Mount static files (e.g., index.html, script.js, custom CSS)
 static_dir = Path(__file__).parent / "static"
 app.mount("/static", StaticFiles(directory=static_dir), name="static")
 
-# API routes
+# Cloud Run service endpoint URL (replace with your actual Cloud Run URL)
+CLOUD_RUN_URL = "https://audio-processing-service-490280071789.us-east1.run.app/api/conversation"
+
 @app.get("/api/test")
 async def test():
-    logger.info("Test endpoint accessed")
-    return {"status": "ok", "message": "API is running"}
+    """Test endpoint to ensure connectivity to the Cloud Run service."""
+    try:
+        # Forward a test request to Cloud Run's /api/test endpoint (if available)
+        async with httpx.AsyncClient() as client:
+            # Assuming the Cloud Run service has a /api/test endpoint; adjust if needed.
+            response = await client.get(CLOUD_RUN_URL.replace("/api/conversation", "/api/test"))
+            if response.status_code == 200:
+                return {"status": "ok", "message": "Proxy and Cloud Run service are operational"}
+            else:
+                return JSONResponse(status_code=response.status_code, content={"detail": "Cloud Run test failed"})
+    except Exception as e:
+        logger.error(f"Error in test endpoint: {str(e)}")
+        return JSONResponse(status_code=500, content={"detail": str(e)})
 
 @app.post("/api/conversation")
 async def conversation(audio: UploadFile = File(...)):
-    """Process audio and return synthesized speech response"""
-    logger.info(f"Conversation endpoint called with file: {audio.filename}, content-type: {audio.content_type}")
-    
+    """Proxy endpoint: forwards audio file to the Cloud Run audio processing service and streams back the audio response."""
     try:
-        # Read audio data
+        # Read the audio file from the client
         audio_data = await audio.read()
-        logger.info(f"Received audio data of size: {len(audio_data)} bytes")
+        logger.info(f"Proxy received audio: {audio.filename}, size: {len(audio_data)} bytes")
         
-        # Check for API key
-        if not os.getenv("GEMINI_API_KEY"):
-            logger.error("GEMINI_API_KEY not configured")
-            return JSONResponse(
-                status_code=500, 
-                content={"detail": "GEMINI_API_KEY not configured"}
-            )
+        # Prepare the file payload for the Cloud Run service
+        files = {"audio": (audio.filename, audio_data, audio.content_type)}
         
-        # Use Gemini to process audio - THIS IS THE PROBLEM AREA
-        logger.info("Initializing Gemini model")
-        model = genai.GenerativeModel("talking-agent")
+        # Forward the audio file using an asynchronous HTTP client
+        async with httpx.AsyncClient() as client:
+            response = await client.post(CLOUD_RUN_URL, files=files)
         
-        # Convert audio data to the proper format for Gemini
-        # The model expects a properly structured content object with the audio data
-        content = [
-            {
-                "mime_type": audio.content_type,
-                "data": audio_data
-            }
-        ]
+        if response.status_code != 200:
+            logger.error(f"Cloud Run service error: {response.status_code}")
+            return JSONResponse(status_code=response.status_code, content={"detail": "Error from Cloud Run service"})
         
-        logger.info("Processing audio with Gemini")
-        response = model.generate_content(content)  # Pass the structured content
-        if not response.text:
-            logger.error("No response text from Gemini")
-            return JSONResponse(
-                status_code=500, 
-                content={"detail": "No response from AI assistant"}
-            )
-        
-        text = response.text
-        logger.info(f"Generated text response: {text[:100]}...")
-        
-        # Convert text to speech
-        logger.info("Converting text to speech")
-        tts_client = texttospeech.TextToSpeechClient()
-        synthesis_input = texttospeech.SynthesisInput(text=text)
-        voice = texttospeech.VoiceSelectionParams(
-            language_code="en-US",
-            ssml_gender=texttospeech.SsmlVoiceGender.NEUTRAL
-        )
-        audio_config = texttospeech.AudioConfig(
-            audio_encoding=texttospeech.AudioEncoding.LINEAR16
-        )
-        
-        tts_response = tts_client.synthesize_speech(
-            input=synthesis_input, voice=voice, audio_config=audio_config
-        )
-        
-        logger.info(f"Generated audio of size: {len(tts_response.audio_content)} bytes")
-        
-        # Return audio response
-        audio_stream = io.BytesIO(tts_response.audio_content)
+        # Stream the returned audio content to the client
         return StreamingResponse(
-            audio_stream,
+            io.BytesIO(response.content),
             media_type="audio/wav",
             headers={"Content-Disposition": "inline; filename=response.wav"}
         )
     
     except Exception as e:
-        logger.error(f"Error in conversation endpoint: {str(e)}")
-        return JSONResponse(
-            status_code=500,
-            content={"detail": f"Error processing request: {str(e)}"}
-        )
+        logger.error(f"Proxy error: {str(e)}")
+        return JSONResponse(status_code=500, content={"detail": f"Error processing request: {str(e)}"})
 
-# Serve the main HTML page
 @app.get("/")
 async def serve_index():
     return FileResponse(static_dir / "index.html")
 
-# For running locally
 if __name__ == "__main__":
     import uvicorn
-    port = int(os.getenv("PORT", 8000))
-    uvicorn.run("main:app", host="0.0.0.0", port=port)
+    uvicorn.run("main:app", host="0.0.0.0", port=8000)
