@@ -63,12 +63,21 @@ async def conversation(audio: UploadFile = File(...)):
                 content={"detail": "GEMINI_API_KEY not configured"}
             )
         
-        # Use Gemini to process audio
+        # Use Gemini to process audio - THIS IS THE PROBLEM AREA
         logger.info("Initializing Gemini model")
         model = genai.GenerativeModel("talking-agent")
         
+        # Convert audio data to the proper format for Gemini
+        # The model expects a properly structured content object with the audio data
+        content = [
+            {
+                "mime_type": audio.content_type,
+                "data": audio_data
+            }
+        ]
+        
         logger.info("Processing audio with Gemini")
-        response = model.generate_content(audio_data)
+        response = model.generate_content(content)  # Pass the structured content
         if not response.text:
             logger.error("No response text from Gemini")
             return JSONResponse(
