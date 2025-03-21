@@ -4,12 +4,22 @@ import google.generativeai as genai
 from google.cloud import texttospeech
 import os
 import io
+import json
 
 app = FastAPI(title="Talking Agent Backend")
 
+# Write TTS credentials to a temporary file
+tts_credentials_json = os.getenv("TTS_CREDENTIALS_JSON")
+if tts_credentials_json:
+    with open("/tmp/tts-credentials.json", "w") as f:
+        f.write(tts_credentials_json)
+    os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = "/tmp/tts-credentials.json"
+else:
+    raise ValueError("TTS_CREDENTIALS_JSON environment variable not set")
+
 # Configure APIs with environment variables
 genai.configure(api_key=os.getenv("GEMINI_API_KEY"))
-model = genai.GenerativeModel("talking-agent")  # Your Google AI Studio assistant name
+model = genai.GenerativeModel("talking-agent")
 tts_client = texttospeech.TextToSpeechClient()
 
 @app.post("/conversation")
@@ -25,7 +35,7 @@ async def conversation(audio: UploadFile = File(...)):
             raise HTTPException(status_code=400, detail="Only .wav files are supported")
 
         # Send audio to Gemini API (talking-agent assistant)
-        response = model.generate_content(audio_data)  # Assumes audio input support
+        response = model.generate_content(audio_data)
         if not response.text:
             raise HTTPException(status_code=500, detail="No response from AI assistant")
         text = response.text
@@ -53,5 +63,3 @@ async def conversation(audio: UploadFile = File(...)):
 
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error processing request: {str(e)}")
-
-# Run with: uvicorn main:app --host 0.0.0.0 --port 8000
