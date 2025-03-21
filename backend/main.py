@@ -1,5 +1,6 @@
 from fastapi import FastAPI, File, UploadFile, HTTPException
 from fastapi.responses import StreamingResponse
+from fastapi.middleware.cors import CORSMiddleware
 import google.generativeai as genai
 from google.cloud import texttospeech
 import os
@@ -7,6 +8,15 @@ import io
 import json
 
 app = FastAPI(title="Talking Agent Backend")
+
+# Add CORS middleware
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["https://talking-agent-epgd.onrender.com"],  # Allow the front-end domain
+    allow_credentials=True,
+    allow_methods=["*"],  # Allow all methods (GET, POST, etc.)
+    allow_headers=["*"],  # Allow all headers
+)
 
 # Write TTS credentials to a temporary file
 tts_credentials_json = os.getenv("TTS_CREDENTIALS_JSON")
