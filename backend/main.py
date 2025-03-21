@@ -1,5 +1,5 @@
-from fastapi import FastAPI, File, UploadFile, HTTPException
-from fastapi.responses import StreamingResponse
+from fastapi import FastAPI, File, UploadFile, HTTPException, Request
+from fastapi.responses import StreamingResponse, JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 import google.generativeai as genai
 from google.cloud import texttospeech
@@ -8,15 +8,15 @@ import io
 
 app = FastAPI(title="Talking Agent Backend")
 
-# More detailed CORS middleware configuration
+# CORS middleware configuration
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # Allow all origins for testing
+    allow_origins=["*"],  # Allow all origins
     allow_credentials=True,
-    allow_methods=["GET", "POST", "OPTIONS"],  # Explicitly list the methods
+    allow_methods=["GET", "POST", "OPTIONS", "PUT", "DELETE"],  # Allow all common methods
     allow_headers=["*"],  # Allow all headers
-    expose_headers=["Content-Disposition"],  # Expose headers needed for response
-    max_age=86400,  # Cache preflight requests for 24 hours
+    expose_headers=["Content-Disposition"],
+    max_age=86400,
 )
 
 # Write TTS credentials to a temporary file
@@ -27,7 +27,6 @@ if tts_credentials_json:
     os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = "/tmp/tts-credentials.json"
 else:
     print("WARNING: TTS_CREDENTIALS_JSON environment variable not set")
-    # Don't raise error here to allow the application to start
 
 # Configure APIs with environment variables
 api_key = os.getenv("GEMINI_API_KEY")
@@ -36,7 +35,7 @@ if not api_key:
 else:
     genai.configure(api_key=api_key)
 
-# Add a simple test endpoint
+# Simple health check endpoints
 @app.get("/")
 async def root():
     return {"status": "online", "message": "Talking Agent Backend is running"}
@@ -45,49 +44,55 @@ async def root():
 async def test():
     return {"status": "ok", "message": "Backend is running and CORS should be working"}
 
-# Add OPTIONS method handler for the conversation endpoint to support preflight requests
-@app.options("/conversation")
-async def options_conversation():
-    return {}
+# Handle OPTIONS request explicitly for all routes
+@app.options("/{full_path:path}")
+async def options_route(request: Request):
+    return JSONResponse(
+        content={"detail": "OK"},
+        headers={
+            "Access-Control-Allow-Origin": "*",
+            "Access-Control-Allow-Methods": "GET, POST, OPTIONS, PUT, DELETE",
+            "Access-Control-Allow-Headers": "*",
+        }
+    )
 
+# The main conversation endpoint that handles audio processing
 @app.post("/conversation")
 async def conversation(audio: UploadFile = File(...)):
     """
-    Receives a .wav file, processes it with the talking-agent assistant,
+    Receives an audio file, processes it with the talking-agent assistant,
     and returns a .wav audio response.
     """
     try:
-        # Read the uploaded .wav file
+        # Read the uploaded audio file
         audio_data = await audio.read()
         
-        # More permissive file type checking
-        if not (audio.filename.endswith(".wav") or 
-                audio.content_type in ["audio/wav", "audio/wave", "audio/x-wav", 
-                                     "audio/webm", "audio/ogg", "audio/mpeg"]):
-            print(f"Received file: {audio.filename} with content type: {audio.content_type}")
-            # Continue anyway but log the issue
+        # Log file information
+        print(f"Received file: {audio.filename} with content type: {audio.content_type}")
         
-        # Initialize needed clients only when required
+        # Check for API key
         if not api_key:
             raise HTTPException(status_code=500, detail="GEMINI_API_KEY not configured")
         
+        # Initialize Gemini model
         try:
             model = genai.GenerativeModel("talking-agent")
         except Exception as model_error:
             raise HTTPException(status_code=500, 
                              detail=f"Failed to initialize Gemini model: {str(model_error)}")
         
-        # Send audio to Gemini API (talking-agent assistant)
+        # Process with Gemini
         try:
             response = model.generate_content(audio_data)
             if not response.text:
                 raise HTTPException(status_code=500, detail="No response from AI assistant")
             text = response.text
+            print(f"Generated response text: {text[:100]}...")  # Log first 100 chars
         except Exception as gemini_error:
             raise HTTPException(status_code=500, 
                              detail=f"Error processing with Gemini: {str(gemini_error)}")
 
-        # Convert text to .wav using Google Text-to-Speech
+        # Text-to-Speech conversion
         try:
             tts_client = texttospeech.TextToSpeechClient()
             synthesis_input = texttospeech.SynthesisInput(text=text)
@@ -96,23 +101,24 @@ async def conversation(audio: UploadFile = File(...)):
                 ssml_gender=texttospeech.SsmlVoiceGender.NEUTRAL
             )
             audio_config = texttospeech.AudioConfig(
-                audio_encoding=texttospeech.AudioEncoding.LINEAR16  # .wav format
+                audio_encoding=texttospeech.AudioEncoding.LINEAR16
             )
             tts_response = tts_client.synthesize_speech(
                 input=synthesis_input, voice=voice, audio_config=audio_config
             )
+            print(f"Generated audio response of {len(tts_response.audio_content)} bytes")
         except Exception as tts_error:
             raise HTTPException(status_code=500, 
                              detail=f"Error with Text-to-Speech: {str(tts_error)}")
 
-        # Return the .wav audio as a streaming response
+        # Stream the audio response
         audio_stream = io.BytesIO(tts_response.audio_content)
         return StreamingResponse(
             audio_stream,
             media_type="audio/wav",
             headers={
                 "Content-Disposition": "inline; filename=response.wav",
-                "Access-Control-Allow-Origin": "*"  # Additional CORS header in response
+                "Access-Control-Allow-Origin": "*"
             }
         )
 
@@ -120,7 +126,7 @@ async def conversation(audio: UploadFile = File(...)):
         print(f"Error in /conversation endpoint: {str(e)}")
         raise HTTPException(status_code=500, detail=f"Error processing request: {str(e)}")
 
-# If this file is run directly, start the server
+# Start the server if run directly
 if __name__ == "__main__":
     import uvicorn
     port = int(os.getenv("PORT", 8000))

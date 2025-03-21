@@ -48,35 +48,46 @@ document.addEventListener('DOMContentLoaded', () => {
                 micIcon.classList.remove('animate-pulse', 'text-yellow-300');
                 status.textContent = 'Processing...';
 
-                const blob = new Blob(chunks, { type: 'audio/wav' });
+                // Create blob from recorded chunks
+                const blob = new Blob(chunks, { type: 'audio/webm' });
                 console.log('Audio blob created:', blob);
 
                 const formData = new FormData();
-                formData.append('audio', blob, 'recording.wav');
+                formData.append('audio', blob, 'recording.webm');
                 console.log('Sending audio to back-end...');
 
-                const response = await fetch('https://talking-agent-backend.onrender.com/conversation', {
-                    method: 'POST',
-                    body: formData
-                });
+                try {
+                    const response = await fetch('https://talking-agent-backend.onrender.com/conversation', {
+                        method: 'POST',
+                        body: formData,
+                        mode: 'cors',
+                    });
 
-                if (!response.ok) {
-                    throw new Error(`Server responded with ${response.status}: ${await response.text()}`);
+                    if (!response.ok) {
+                        const errorText = await response.text();
+                        console.error(`Server responded with ${response.status}: ${errorText}`);
+                        throw new Error(`Server error: ${response.status} - ${errorText}`);
+                    }
+
+                    console.log('Response received from back-end');
+                    audioBlob = await response.blob();
+                    
+                    // Show the play button and update status
+                    playBtn.classList.remove('hidden');
+                    status.textContent = 'Response ready! Click "Play Response" to listen.';
+                } catch (fetchError) {
+                    console.error('Fetch error:', fetchError);
+                    status.textContent = 'Error connecting to server: ' + fetchError.message;
                 }
-
-                console.log('Response received from back-end');
-                audioBlob = await response.blob();
-                const audioUrl = URL.createObjectURL(audioBlob);
-
-                // Show the play button and update status
-                playBtn.classList.remove('hidden');
-                status.textContent = 'Response ready! Click "Play Response" to listen.';
             };
 
             // Stop recording after 5 seconds
             setTimeout(() => {
-                mediaRecorder.stop();
-            }, 5000);
+                if (mediaRecorder.state === 'recording') {
+                    mediaRecorder.stop();
+                    console.log('Recording stopped after timeout');
+                }
+            }, 15000
         } catch (error) {
             console.error('Error:', error);
             recordBtn.textContent = 'Speak Now';
@@ -84,7 +95,6 @@ document.addEventListener('DOMContentLoaded', () => {
             micIcon.classList.remove('animate-pulse', 'text-yellow-300');
             recordBtn.classList.add('bg-red-500', 'hover:bg-red-600');
             status.textContent = 'Error: ' + error.message;
-            alert('Error: ' + error.message);
         }
     });
 
@@ -95,6 +105,15 @@ document.addEventListener('DOMContentLoaded', () => {
             audio.play();
             status.textContent = 'Playing response...';
             console.log('Playing response audio');
+            
+            audio.onended = () => {
+                status.textContent = 'Playback complete. Click "Speak Now" to record again.';
+            };
+            
+            audio.onerror = (e) => {
+                console.error('Audio playback error:', e);
+                status.textContent = 'Error playing audio.';
+            };
         } else {
             status.textContent = 'No response audio available.';
         }
