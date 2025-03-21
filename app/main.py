@@ -27,7 +27,7 @@ static_dir = Path(__file__).parent / "static"
 app.mount("/static", StaticFiles(directory=static_dir), name="static")
 
 # Cloud Run service endpoint URL (replace with your actual Cloud Run URL)
-CLOUD_RUN_URL = "https://audio-processing-service-490280071789.us-east1.run.app/api/conversation"
+CLOUD_RUN_URL = "https://audio-processing-service-490280071789.us-east1.run.app"
 
 @app.get("/api/test")
 async def test():
